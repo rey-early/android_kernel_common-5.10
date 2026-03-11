@@ -392,8 +392,7 @@ static void bbr_set_tso_segs_goal(struct sock *sk)
     u32 min_segs;
 
     min_segs = sk->sk_pacing_rate < (bbr_min_tso_rate >> 3) ? 1 : 2;
-    bbr->tso_segs_goal = min_t(u32, tcp_tso_segs_goal(sk, tp->mss_cache, min_segs),
-                    0x7FU);
+    bbr->tso_segs_goal = min_t(u32, tcp_tso_autosize(sk, tp->mss_cache, min_segs), 0x7FU);
 }
 
 /* Save "last known good" cwnd so we can restore it after losses or PROBE_RTT */
