@@ -3566,6 +3566,9 @@ static char *custom_module_blacklist[] = {
 #if IS_BUILTIN(CONFIG_ZSMALLOC)
     "zsmalloc",
 #endif
+#if IS_BUILTIN(CONFIG_MQ_IOSCHED_ADIOS)
+    "adios",
+#endif
 };
 
 static bool blacklisted(const char *module_name)
