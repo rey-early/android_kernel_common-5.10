@@ -377,6 +377,9 @@ static const struct seq_operations timer_list_sops = {
 static int __init init_timer_list_procfs(void)
 {
 	struct proc_dir_entry *pe;
+	
+	if (IS_ENABLED(CONFIG_PROC_STRIPPED))
+		return 0;
 
 	pe = proc_create_seq_private("timer_list", 0400, NULL, &timer_list_sops,
 			sizeof(struct timer_list_iter), NULL);
