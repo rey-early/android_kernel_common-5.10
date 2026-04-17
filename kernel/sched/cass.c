@@ -2,6 +2,10 @@
 /*
  * Copyright (C) 2023-2024 Sultan Alsawaf <sultan@kerneltoast.com>.
  */
+ 
+#include <linux/cpumask.h>
+#include <linux/sched.h>
+#include <linux/sched/task.h>
 
 /**
  * DOC: Capacity Aware Superset Scheduler (CASS) description
