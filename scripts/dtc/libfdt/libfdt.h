@@ -187,7 +187,8 @@ int fdt_next_node(const void *fdt, int offset, int *depth);
  *
  * @fdt:	FDT blob
  * @offset:	Offset of node to check
- * @return offset of first subnode, or -FDT_ERR_NOTFOUND if there is none
+ *
+ * returns: offset of first subnode, or -FDT_ERR_NOTFOUND if there is none
  */
 int fdt_first_subnode(const void *fdt, int offset);
 
@@ -197,10 +198,8 @@ int fdt_first_subnode(const void *fdt, int offset);
  * After first calling fdt_first_subnode(), call this function repeatedly to
  * get direct subnodes of a parent node.
  *
- * @fdt:	FDT blob
- * @offset:	Offset of previous subnode
- * @return offset of next subnode, or -FDT_ERR_NOTFOUND if there are no more
- * subnodes
+ * returns: offset of next subnode, or -FDT_ERR_NOTFOUND if there are no more
+ *          subnodes
  */
 int fdt_next_subnode(const void *fdt, int offset);
 
@@ -269,11 +268,16 @@ fdt_set_hdr_(size_dt_struct);
 /**
  * fdt_header_size - return the size of the tree's header
  * @fdt: pointer to a flattened device tree
+ *
+ * returns: size of DTB header in bytes
  */
 size_t fdt_header_size(const void *fdt);
 
 /**
- * fdt_header_size_ - internal function which takes a version number
+ * fdt_header_size_ - internal function to get header size from a version number
+ * @version: device tree version number
+ *
+ * returns: size of DTB header in bytes
  */
 size_t fdt_header_size_(uint32_t version);
 
@@ -404,8 +408,7 @@ static inline uint32_t fdt_get_max_phandle(const void *fdt)
  * highest phandle value in the device tree blob) will be returned in the
  * @phandle parameter.
  *
- * Returns:
- *   0 on success or a negative error-code on failure
+ * returns: 0 on success or a negative error-code on failure
  */
 int fdt_generate_phandle(const void *fdt, uint32_t *phandle);
 
@@ -418,7 +421,12 @@ int fdt_generate_phandle(const void *fdt, uint32_t *phandle);
  * or any other (0,0) entries reserved for expansion.
  *
  * returns:
- *     the number of entries
+ *     the number of entries, on success
+ *     -FDT_ERR_ALIGNMENT,
+ *     -FDT_ERR_BADMAGIC,
+ *     -FDT_ERR_BADVERSION,
+ *     -FDT_ERR_BADSTATE,
+ *     -FDT_ERR_TRUNCATED, standard meanings
  */
 int fdt_num_mem_rsv(const void *fdt);
 
@@ -450,6 +458,8 @@ int fdt_get_mem_rsv(const void *fdt, int n, uint64_t *address, uint64_t *size);
  * namelen characters of name for matching the subnode name.  This is
  * useful for finding subnodes based on a portion of a larger string,
  * such as a full path.
+ *
+ * returns: offset of the subnode or -FDT_ERR_NOTFOUND if name not found.
  */
 #ifndef SWIG /* Not available in Python */
 int fdt_subnode_offset_namelen(const void *fdt, int parentoffset,
@@ -489,6 +499,8 @@ int fdt_subnode_offset(const void *fdt, int parentoffset, const char *name);
  *
  * Identical to fdt_path_offset(), but only consider the first namelen
  * characters of path as the path name.
+ *
+ * returns: offset of the node or negative libfdt error value otherwise
  */
 #ifndef SWIG /* Not available in Python */
 int fdt_path_offset_namelen(const void *fdt, const char *path, int namelen);
@@ -653,6 +665,9 @@ const struct fdt_property *fdt_get_property_by_offset(const void *fdt,
  *
  * Identical to fdt_get_property(), but only examine the first namelen
  * characters of name for matching the property name.
+ *
+ * returns: pointer to the structure representing the property, or NULL
+ *         if not found
  */
 #ifndef SWIG /* Not available in Python */
 const struct fdt_property *fdt_get_property_namelen(const void *fdt,
@@ -745,6 +760,8 @@ const void *fdt_getprop_by_offset(const void *fdt, int offset,
  *
  * Identical to fdt_getprop(), but only examine the first namelen
  * characters of name for matching the property name.
+ *
+ * returns: pointer to the property's value or NULL on error
  */
 #ifndef SWIG /* Not available in Python */
 const void *fdt_getprop_namelen(const void *fdt, int nodeoffset,
@@ -814,8 +831,11 @@ uint32_t fdt_get_phandle(const void *fdt, int nodeoffset);
  * @name: name of the alias th look up
  * @namelen: number of characters of name to consider
  *
- * Identical to fdt_get_alias(), but only examine the first namelen
- * characters of name for matching the alias name.
+ * Identical to fdt_get_alias(), but only examine the first @namelen
+ * characters of @name for matching the alias name.
+ *
+ * returns: a pointer to the expansion of the alias named @name, if it exists,
+ *	    NULL otherwise
  */
 #ifndef SWIG /* Not available in Python */
 const char *fdt_get_alias_namelen(const void *fdt,
@@ -835,6 +855,42 @@ const char *fdt_get_alias_namelen(const void *fdt,
  *	NULL, if the given alias or the /aliases node does not exist
  */
 const char *fdt_get_alias(const void *fdt, const char *name);
+
+/**
+ * fdt_get_symbol_namelen - get symbol based on substring
+ * @fdt: pointer to the device tree blob
+ * @name: name of the symbol to look up
+ * @namelen: number of characters of name to consider
+ *
+ * Identical to fdt_get_symbol(), but only examine the first @namelen
+ * characters of @name for matching the symbol name.
+ *
+ * returns: a pointer to the expansion of the symbol named @name, if it exists,
+ *	    NULL otherwise
+ */
+#ifndef SWIG /* Not available in Python */
+const char *fdt_get_symbol_namelen(const void *fdt,
+				   const char *name, int namelen);
+#endif
+
+/**
+ * fdt_get_symbol - retrieve the path referenced by a given symbol
+ * @fdt: pointer to the device tree blob
+ * @name: name of the symbol to look up
+ *
+ * fdt_get_symbol() retrieves the value of a given symbol.  That is,
+ * the value of the property named @name in the node
+ * /__symbols__. Such a node exists only for a device tree blob that
+ * has been compiled with the -@ dtc option. Each property corresponds
+ * to a label appearing in the device tree source, with the name of
+ * the property being the label and the value being the full path of
+ * the node it is attached to.
+ *
+ * returns:
+ *	a pointer to the expansion of the symbol named 'name', if it exists
+ *	NULL, if the given symbol or the /__symbols__ node does not exist
+ */
+const char *fdt_get_symbol(const void *fdt, const char *name);
 
 /**
  * fdt_get_path - determine the full path of a node
@@ -1075,7 +1131,7 @@ int fdt_node_offset_by_compatible(const void *fdt, int startoffset,
  * one or more strings, each terminated by \0, as is found in a device tree
  * "compatible" property.
  *
- * @return: 1 if the string is found in the list, 0 not found, or invalid list
+ * returns: 1 if the string is found in the list, 0 not found, or invalid list
  */
 int fdt_stringlist_contains(const char *strlist, int listlen, const char *str);
 
@@ -1084,7 +1140,8 @@ int fdt_stringlist_contains(const char *strlist, int listlen, const char *str);
  * @fdt: pointer to the device tree blob
  * @nodeoffset: offset of a tree node
  * @property: name of the property containing the string list
- * @return:
+ *
+ * returns:
  *   the number of strings in the given property
  *   -FDT_ERR_BADVALUE if the property value is not NUL-terminated
  *   -FDT_ERR_NOTFOUND if the property does not exist
@@ -1128,7 +1185,7 @@ int fdt_stringlist_search(const void *fdt, int nodeoffset, const char *property,
  * If non-NULL, the length of the string (on success) or a negative error-code
  * (on failure) will be stored in the integer pointer to by lenp.
  *
- * @return:
+ * returns:
  *   A pointer to the string at the given index in the string list or NULL on
  *   failure. On success the length of the string will be stored in the memory
  *   location pointed to by the lenp parameter, if non-NULL. On failure one of
@@ -1217,6 +1274,8 @@ int fdt_size_cells(const void *fdt, int nodeoffset);
  * starting from the given index, and using only the first characters
  * of the name. It is useful when you want to manipulate only one value of
  * an array and you have a string that doesn't end with \0.
+ *
+ * returns: 0 on success, negative libfdt error value otherwise
  */
 #ifndef SWIG /* Not available in Python */
 int fdt_setprop_inplace_namelen_partial(void *fdt, int nodeoffset,
@@ -1332,6 +1391,7 @@ static inline int fdt_setprop_inplace_u64(void *fdt, int nodeoffset,
  * fdt_setprop_inplace_cell - change the value of a single-cell property
  *
  * This is an alternative name for fdt_setprop_inplace_u32()
+ * returns: 0 on success, negative libfdt error number otherwise.
  */
 static inline int fdt_setprop_inplace_cell(void *fdt, int nodeoffset,
 					   const char *name, uint32_t val)
@@ -1693,6 +1753,8 @@ static inline int fdt_setprop_u64(void *fdt, int nodeoffset, const char *name,
  * fdt_setprop_cell - set a property to a single cell value
  *
  * This is an alternative name for fdt_setprop_u32()
+ *
+ * returns: 0 on success, negative libfdt error value otherwise.
  */
 static inline int fdt_setprop_cell(void *fdt, int nodeoffset, const char *name,
 				   uint32_t val)
@@ -1865,6 +1927,8 @@ static inline int fdt_appendprop_u64(void *fdt, int nodeoffset,
  * fdt_appendprop_cell - append a single cell value to a property
  *
  * This is an alternative name for fdt_appendprop_u32()
+ *
+ * returns: 0 on success, negative libfdt error value otherwise.
  */
 static inline int fdt_appendprop_cell(void *fdt, int nodeoffset,
 				      const char *name, uint32_t val)
@@ -1974,6 +2038,9 @@ int fdt_delprop(void *fdt, int nodeoffset, const char *name);
  * characters of name as the name of the new node.  This is useful for
  * creating subnodes based on a portion of a larger string, such as a
  * full path.
+ *
+ * returns: structure block offset of the created subnode (>=0),
+ *          negative libfdt error value otherwise
  */
 #ifndef SWIG /* Not available in Python */
 int fdt_add_subnode_namelen(void *fdt, int parentoffset,
