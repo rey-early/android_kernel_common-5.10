@@ -27,6 +27,8 @@
 
 #include <trace/hooks/sched.h>
 
+#include <linux/prefer_silver.h>
+
 EXPORT_TRACEPOINT_SYMBOL_GPL(sched_stat_runtime);
 
 /*
@@ -7024,6 +7026,12 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu, int sy
 	pd = rcu_dereference(rd->pd);
 	if (!pd || READ_ONCE(rd->overutilized))
 		goto fail;
+	
+	if (sysctl_prefer_silver && prefer_silver_check_task_util(p)) {
+		int best = find_best_silver_cpu(p);
+		if (best >= 0)
+			return best;
+	}
 
 	cpu = smp_processor_id();
 	if (sync && cpu_rq(cpu)->nr_running == 1 &&
