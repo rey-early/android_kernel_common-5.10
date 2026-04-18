@@ -2236,6 +2236,12 @@ config MODVERSIONS
 	  make them incompatible with the kernel you are running.  If
 	  unsure, say N.
 
+config OPLUS_PREFER_SILVER
+	default y
+	bool "a task placement decision for non-ui task"
+	help
+	  task placement decision feature for non-ui task
+
 config ASM_MODVERSIONS
 	bool
 	default HAVE_ASM_MODVERSIONS && MODVERSIONS
