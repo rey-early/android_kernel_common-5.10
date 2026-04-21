@@ -19,6 +19,7 @@ static unsigned int target_load_big = 60;
 static unsigned int target_load_little = 70; 
 static unsigned int fast_ramp_up_load = 80;  
 static unsigned int touch_boost_load = 75;
+static struct workqueue_struct *zv_wq;
 
 /* Ekspos variabel ke /sys/module/cpufreq_zixine/parameterss/ */
 module_param(target_load_big, uint, 0644);
