@@ -183,9 +183,10 @@ static void zv_stop(struct cpufreq_policy *policy)
     cpufreq_disable_fast_switch(policy);
 }
 
-static struct cpufreq_governor gov_zixine_velocity = {
+/* Kata 'static' dihapus agar bisa dibaca oleh cpufreq.c */
+struct cpufreq_governor gov_zixine_velocity = {
     .name       = "zixine_velocity",
-    .flags      = CPUFREQ_GOV_DYNAMIC_SWITCHING, /* Memberitahu kernel ini adalah governor dinamis */
+    .flags      = CPUFREQ_GOV_DYNAMIC_SWITCHING,
     .owner      = THIS_MODULE,
     .init       = zv_init,
     .exit       = zv_exit,
