@@ -184,7 +184,7 @@ static void zv_stop(struct cpufreq_policy *policy)
 }
 
 /* Kata 'static' dihapus agar bisa dibaca oleh cpufreq.c */
-struct cpufreq_governor gov_zixine_velocity = {
+static struct cpufreq_governor gov_zixine_velocity = {
     .name       = "zixine_velocity",
     .flags      = CPUFREQ_GOV_DYNAMIC_SWITCHING,
     .owner      = THIS_MODULE,
@@ -193,6 +193,13 @@ struct cpufreq_governor gov_zixine_velocity = {
     .start      = zv_start,
     .stop       = zv_stop,
 };
+
+#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_ZIXINE_VELOCITY
+struct cpufreq_governor *cpufreq_default_governor(void)
+{
+    return &gov_zixine_velocity;
+}
+#endif
 
 /* Pastikan ini ada di bagian atas kode (di bawah parameter):
  * static struct workqueue_struct *zv_wq;
