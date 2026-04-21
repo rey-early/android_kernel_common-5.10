@@ -1033,6 +1033,11 @@ void arch_set_freq_scale(const struct cpumask *cpus,
 			 unsigned long max_freq)
 {
 }
+
+#elif defined(CONFIG_CPU_FREQ_DEFAULT_GOV_ZIXINE_VELOCITY)
+extern struct cpufreq_governor gov_zixine_velocity;
+#define cpufreq_default_governor (&gov_zixine_velocity)
+
 #endif
 
 /* the following are really really optional */
