@@ -2,7 +2,7 @@
 /*
  * Zixine Velocity v1.1 - Smoothness Edition
  * Optimasi: Touch Boost Simulation, IO-Wait Sensitivity, & Frame-Sync Sampling
- * Author: zixine & Gemini
+ * Author: zixine
  */
 
 #include <linux/cpufreq.h>
@@ -184,3 +184,9 @@ module_exit(zv_gov_exit);
 MODULE_AUTHOR("zixine");
 MODULE_DESCRIPTION("Zixine Velocity v1.1 - Smoothness Edition");
 MODULE_LICENSE("GPL v2");
+
+static int __init zv_gov_init(void)
+{
+    pr_info("Zixine Velocity Governor v1.1 Loaded - Smoothness Edition!\n");
+    return cpufreq_register_governor(&gov_zixine_velocity);
+}
