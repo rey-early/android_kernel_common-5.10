@@ -102,12 +102,16 @@ static void zv_eval_freq(struct cpufreq_policy *policy)
     if (freq_target < policy->min) freq_target = policy->min;
     if (freq_target > policy->max) freq_target = policy->max;
 
-    /* Optimasi 2: Sinkronisasi Frame Rate
-     * Gunakan CPUFREQ_RELATION_H agar selalu membulatkan frekuensi ke atas (Smooth)
-     */
+        /* Optimasi 2: Sinkronisasi Frame Rate & Fast Switching */
     if (freq_target != info->target_freq) {
         info->target_freq = freq_target;
-        __cpufreq_driver_target(policy, freq_target, CPUFREQ_RELATION_H);
+        
+        /* Gunakan Fast Switch jika didukung oleh driver CPU, jika tidak gunakan cara standar */
+        if (policy->fast_switch_enabled) {
+            cpufreq_driver_fast_switch(policy, freq_target);
+        } else {
+            __cpufreq_driver_target(policy, freq_target, CPUFREQ_RELATION_H);
+        }
     }
 
     /* Optimasi 3: Adaptive Sampling 
@@ -154,6 +158,10 @@ static void zv_exit(struct cpufreq_policy *policy)
 static int zv_start(struct cpufreq_policy *policy)
 {
     unsigned int cpu;
+    
+    /* Aktifkan Fast Switching untuk policy ini */
+    cpufreq_enable_fast_switch(policy);
+
     for_each_cpu(cpu, policy->cpus) {
         struct zv_cpu_info *info = &per_cpu(zv_info, cpu);
         info->prev_cpu_wall = ktime_get_ns();
@@ -169,15 +177,19 @@ static void zv_stop(struct cpufreq_policy *policy)
 {
     struct zv_policy_info *zpinfo = policy->governor_data;
     if (zpinfo) cancel_delayed_work_sync(&zpinfo->work);
+    
+    /* Nonaktifkan Fast Switching saat governor berhenti */
+    cpufreq_disable_fast_switch(policy);
 }
 
 static struct cpufreq_governor gov_zixine_velocity = {
-    .name		= "zixine_velocity",
-    .owner		= THIS_MODULE,
-    .init		= zv_init,
-    .exit		= zv_exit,
-    .start		= zv_start,
-    .stop		= zv_stop,
+    .name       = "zixine_velocity",
+    .flags      = CPUFREQ_GOV_DYNAMIC_SWITCHING, /* Memberitahu kernel ini adalah governor dinamis */
+    .owner      = THIS_MODULE,
+    .init       = zv_init,
+    .exit       = zv_exit,
+    .start      = zv_start,
+    .stop       = zv_stop,
 };
 
 static int __init zv_gov_init(void)
