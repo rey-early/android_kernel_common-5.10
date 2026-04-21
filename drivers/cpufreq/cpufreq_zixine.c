@@ -192,14 +192,44 @@ static struct cpufreq_governor gov_zixine_velocity = {
     .stop       = zv_stop,
 };
 
+/* Pastikan ini ada di bagian atas kode (di bawah parameter):
+ * static struct workqueue_struct *zv_wq;
+ */
+
 static int __init zv_gov_init(void)
 {
-    return cpufreq_register_governor(&gov_zixine_velocity);
+    int err;
+
+    /* 1. Inisialisasi High-Priority Workqueue */
+    zv_wq = alloc_workqueue("zv_wq", WQ_HIGHPRI | WQ_FREEZABLE, 0);
+    if (!zv_wq) {
+        pr_err("Zixine Velocity: Gagal mengalokasikan workqueue!\n");
+        return -ENOMEM;
+    }
+
+    /* 2. Registrasi Governor */
+    err = cpufreq_register_governor(&gov_zixine_velocity);
+    if (err) {
+        pr_err("Zixine Velocity: Gagal mendaftarkan governor!\n");
+        destroy_workqueue(zv_wq); /* Bersihkan WQ jika registrasi gagal */
+        return err;
+    }
+
+    pr_info("Zixine Velocity Governor v1.1 Loaded - Smoothness Edition (Extreme)!\n");
+    return 0;
 }
 
 static void __exit zv_gov_exit(void)
 {
+    /* 1. Lepas Governor */
     cpufreq_unregister_governor(&gov_zixine_velocity);
+    
+    /* 2. Hancurkan Workqueue */
+    if (zv_wq) {
+        destroy_workqueue(zv_wq);
+    }
+    
+    pr_info("Zixine Velocity Governor Unloaded.\n");
 }
 
 module_init(zv_gov_init);
@@ -207,9 +237,3 @@ module_exit(zv_gov_exit);
 MODULE_AUTHOR("zixine");
 MODULE_DESCRIPTION("Zixine Velocity v1.1 - Smoothness Edition");
 MODULE_LICENSE("GPL v2");
-
-static int __init zv_gov_init(void)
-{
-    pr_info("Zixine Velocity Governor v1.1 Loaded - Smoothness Edition!\n");
-    return cpufreq_register_governor(&gov_zixine_velocity);
-}
