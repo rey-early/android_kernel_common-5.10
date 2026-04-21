@@ -20,7 +20,7 @@ static unsigned int target_load_little = 70;
 static unsigned int fast_ramp_up_load = 80;  
 static unsigned int touch_boost_load = 75;
 
-/* Ekspos variabel ke /sys/module/cpufreq_zixine/parameters/ */
+/* Ekspos variabel ke /sys/module/cpufreq_zixine/parameterss/ */
 module_param(target_load_big, uint, 0644);
 MODULE_PARM_DESC(target_load_big, "Target load untuk core Big (default: 60)");
 
