@@ -15,10 +15,23 @@
 #include <linux/tick.h>
 
 /* Zixine Velocity Parameters */
-static unsigned int target_load_big = 60;    /* Lebih agresif dari v1.0 */
+static unsigned int target_load_big = 60;
 static unsigned int target_load_little = 70; 
 static unsigned int fast_ramp_up_load = 80;  
-static unsigned int touch_boost_load = 75;   /* Simulasi beban saat ada interaksi */
+static unsigned int touch_boost_load = 75;
+
+/* Ekspos variabel ke /sys/module/cpufreq_zixine/parameters/ */
+module_param(target_load_big, uint, 0644);
+MODULE_PARM_DESC(target_load_big, "Target load untuk core Big (default: 60)");
+
+module_param(target_load_little, uint, 0644);
+MODULE_PARM_DESC(target_load_little, "Target load untuk core Little (default: 70)");
+
+module_param(fast_ramp_up_load, uint, 0644);
+MODULE_PARM_DESC(fast_ramp_up_load, "Batas beban untuk frekuensi maksimal instan (default: 80)");
+
+module_param(touch_boost_load, uint, 0644);
+MODULE_PARM_DESC(touch_boost_load, "Simulasi beban saat touch boost (default: 75)");
 
 struct zv_cpu_info {
     u64 prev_cpu_idle;
@@ -36,9 +49,7 @@ struct zv_policy_info {
     struct cpufreq_policy *policy;
 };
 
-/* ========================================================================
- * CORE LOGIC: VELOCITY-BASED SCALING (SMOOTHNESS EDITION)
- * ======================================================================== */
+/** CORE LOGIC: VELOCITY-BASED SCALING (SMOOTHNESS EDITION)**/
 static void zv_eval_freq(struct cpufreq_policy *policy)
 {
     struct zv_cpu_info *info = &per_cpu(zv_info, policy->cpu);
