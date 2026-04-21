@@ -122,6 +122,12 @@ config CPU_FREQ_DEFAULT_GOV_SCHEDHORIZON
 	  have a look at the help section of that governor. The fallback
 	  governor will be 'performance'.
 
+config CPU_FREQ_DEFAULT_GOV_ZIXINE_VELOCITY
+	bool "zixine_velocity"
+	select CPU_FREQ_GOV_ZIXINE_VELOCITY
+	help
+	  Gunakan CPUFreq governor 'zixine_velocity' sebagai default.
+
 endchoice
 
 config CPU_FREQ_GOV_PERFORMANCE
@@ -243,6 +249,22 @@ config CPU_FREQ_GOV_SCHEDHORIZON
           to 1401mhz.
 
 	  If in doubt, say N.
+
+config CPU_FREQ_GOV_ZIXINE_VELOCITY
+	tristate "'zixine_velocity' cpufreq governor"
+	depends on CPU_FREQ
+	help
+	  'zixine_velocity' - Governor ini dioptimalkan khusus untuk 
+	  kestabilan dan kehalusan sistem (Smoothness Edition).
+
+	  Governor ini menggunakan Touch Boost Simulation dan 
+	  Adaptive Sampling untuk menjaga responsivitas tinggi
+	  saat ada interaksi, serta menghemat daya saat sistem tenang.
+
+	  Untuk mengkompilasi driver ini sebagai modul, pilih M di sini:
+	  modul akan dinamakan cpufreq_zixine.
+
+	  Jika ragu, pilih N.
 
 config CPUFREQ_DT
 	tristate "Generic DT based cpufreq driver"
