@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Zixine Velocity v1.1 - Smoothness Edition
+ * Zixine Velocity v1.1 - Smoothness Edition (Fixed & Optimized)
  * Optimasi: Touch Boost Simulation, IO-Wait Sensitivity, & Frame-Sync Sampling
  * Author: zixine
  */
@@ -21,7 +21,7 @@ static unsigned int fast_ramp_up_load = 80;
 static unsigned int touch_boost_load = 75;
 static struct workqueue_struct *zv_wq;
 
-/* Ekspos variabel ke /sys/module/cpufreq_zixine/parameterss/ */
+/* Ekspos variabel ke /sys/module/cpufreq_zixine/parameters/ */
 module_param(target_load_big, uint, 0644);
 MODULE_PARM_DESC(target_load_big, "Target load untuk core Big (default: 60)");
 
@@ -50,7 +50,7 @@ struct zv_policy_info {
     struct cpufreq_policy *policy;
 };
 
-/** CORE LOGIC: VELOCITY-BASED SCALING (SMOOTHNESS EDITION)**/
+/** CORE LOGIC: VELOCITY-BASED SCALING (FIXED UNIT VERSION) **/
 static void zv_eval_freq(struct cpufreq_policy *policy)
 {
     struct zv_cpu_info *info = &per_cpu(zv_info, policy->cpu);
@@ -58,7 +58,8 @@ static void zv_eval_freq(struct cpufreq_policy *policy)
     unsigned int load, freq_target, target_load;
     int load_velocity;
 
-    cur_wall = ktime_get_ns();
+    /* Konversi Nanodetik ke Mikrodetik agar sinkron dengan get_cpu_idle_time */
+    cur_wall = ktime_get_ns() / 1000;
     cur_idle = get_cpu_idle_time(policy->cpu, &cur_wall, 1); // 1 = IO Wait Aware
 
     wall_time = cur_wall - info->prev_cpu_wall;
@@ -67,47 +68,48 @@ static void zv_eval_freq(struct cpufreq_policy *policy)
     info->prev_cpu_wall = cur_wall;
     info->prev_cpu_idle = cur_idle;
 
-    if (unlikely(!wall_time || wall_time < idle_time)) {
+    if (unlikely(!wall_time || wall_time <= idle_time)) {
         load = 0;
     } else {
+        /* Rumus Beban CPU akurat dalam mikrodetik */
         load = 100 * (wall_time - idle_time) / wall_time;
     }
+
+    if (load > 100) load = 100;
 
     /* Optimasi: Hitung Akselerasi Beban (Velocity) */
     load_velocity = (int)load - (int)info->prev_load;
     info->prev_load = load;
 
-    /* Optimasi 1: Touch/Interaction Boost Simulation 
-     * Jika ada lonjakan mendadak (>30%), asumsikan interaksi UI sedang terjadi 
-     */
+    /* Optimasi 1: Touch/Interaction Boost Simulation */
     if (load_velocity > 30) {
         load = (load + touch_boost_load) / 2;
         info->hold_counter = 5; // Tahan frekuensi tinggi selama 5 siklus
     }
 
+    /* Tentukan target load berdasarkan cluster (Little < 4, Big >= 4) */
     target_load = (policy->cpu >= 4) ? target_load_big : target_load_little;
 
-    /* Matrix Kalkulasi Frekuensi */
+    /* Matrix Kalkulasi Frekuensi dengan Proteksi Overflow (u64 casting) */
     if (load >= fast_ramp_up_load) {
         freq_target = policy->max;
-    } else if (load > target_load) {
-        freq_target = (policy->cur * load) / target_load;
     } else if (info->hold_counter > 0) {
-        freq_target = policy->cur;
+        /* Tahan frekuensi saat ini jika dalam masa hold interaction */
+        freq_target = (policy->cur > info->target_freq) ? policy->cur : info->target_freq;
         info->hold_counter--;
     } else {
-        freq_target = (policy->cur * load) / target_load;
+        /* Skala dinamis berdasarkan policy->max agar stabil di semua clock speed */
+        freq_target = (unsigned int)(((u64)policy->max * load) / target_load);
     }
 
-    /* Clamp frekuensi */
+    /* Clamp frekuensi agar tetap di dalam batas policy device */
     if (freq_target < policy->min) freq_target = policy->min;
     if (freq_target > policy->max) freq_target = policy->max;
 
-        /* Optimasi 2: Sinkronisasi Frame Rate & Fast Switching */
+    /* Sinkronisasi & Fast Switching */
     if (freq_target != info->target_freq) {
         info->target_freq = freq_target;
         
-        /* Gunakan Fast Switch jika didukung oleh driver CPU, jika tidak gunakan cara standar */
         if (policy->fast_switch_enabled) {
             cpufreq_driver_fast_switch(policy, freq_target);
         } else {
@@ -115,14 +117,8 @@ static void zv_eval_freq(struct cpufreq_policy *policy)
         }
     }
 
-    /* Optimasi 3: Adaptive Sampling 
-     * 8ms untuk responsivitas tinggi (Sync 120Hz)
-     * 32ms untuk penghematan daya saat tenang
-     */
-    if (load > 20 || info->hold_counter > 0)
-        info->next_delay_ms = 8;
-    else
-        info->next_delay_ms = 32;
+    /* Adaptive Sampling: 8ms (Sync 120Hz) vs 32ms (Power Save) */
+    info->next_delay_ms = (load > 20 || info->hold_counter > 0) ? 8 : 32;
 }
 
 static void zv_work_handler(struct work_struct *work)
@@ -131,7 +127,10 @@ static void zv_work_handler(struct work_struct *work)
     struct cpufreq_policy *policy = zpinfo->policy;
 
     zv_eval_freq(policy);
-    schedule_delayed_work_on(policy->cpu, &zpinfo->work, msecs_to_jiffies(per_cpu(zv_info, policy->cpu).next_delay_ms));
+
+    /* Menggunakan zv_wq (High-Priority Workqueue) yang sudah dialokasikan di init */
+    queue_delayed_work_on(policy->cpu, zv_wq, &zpinfo->work, 
+                          msecs_to_jiffies(per_cpu(zv_info, policy->cpu).next_delay_ms));
 }
 
 static int zv_init(struct cpufreq_policy *policy)
@@ -160,17 +159,21 @@ static int zv_start(struct cpufreq_policy *policy)
 {
     unsigned int cpu;
     
-    /* Aktifkan Fast Switching untuk policy ini */
     cpufreq_enable_fast_switch(policy);
 
     for_each_cpu(cpu, policy->cpus) {
         struct zv_cpu_info *info = &per_cpu(zv_info, cpu);
-        info->prev_cpu_wall = ktime_get_ns();
+        /* Inisialisasi waktu awal dalam mikrodetik */
+        info->prev_cpu_wall = ktime_get_ns() / 1000;
+        info->prev_cpu_idle = get_cpu_idle_time(cpu, &info->prev_cpu_wall, 1);
         info->hold_counter = 0;
         info->prev_load = 0;
         info->next_delay_ms = 8;
+        info->target_freq = policy->cur;
     }
-    schedule_delayed_work_on(policy->cpu, &((struct zv_policy_info *)policy->governor_data)->work, msecs_to_jiffies(8));
+
+    /* Panggil work pertama kali lewat High-Priority Workqueue */
+    queue_delayed_work_on(policy->cpu, zv_wq, &((struct zv_policy_info *)policy->governor_data)->work, msecs_to_jiffies(8));
     return 0;
 }
 
@@ -179,11 +182,9 @@ static void zv_stop(struct cpufreq_policy *policy)
     struct zv_policy_info *zpinfo = policy->governor_data;
     if (zpinfo) cancel_delayed_work_sync(&zpinfo->work);
     
-    /* Nonaktifkan Fast Switching saat governor berhenti */
     cpufreq_disable_fast_switch(policy);
 }
 
-/* Kata 'static' dihapus agar bisa dibaca oleh cpufreq.c */
 static struct cpufreq_governor gov_zixine_velocity = {
     .name       = "zixine_velocity",
     .flags      = CPUFREQ_GOV_DYNAMIC_SWITCHING,
@@ -201,26 +202,22 @@ struct cpufreq_governor *cpufreq_default_governor(void)
 }
 #endif
 
-/* Pastikan ini ada di bagian atas kode (di bawah parameter):
- * static struct workqueue_struct *zv_wq;
- */
-
 static int __init zv_gov_init(void)
 {
     int err;
 
-    /* 1. Inisialisasi High-Priority Workqueue */
+    /* 1. Alokasi High-Priority Workqueue khusus Zixine Velocity */
     zv_wq = alloc_workqueue("zv_wq", WQ_HIGHPRI | WQ_FREEZABLE, 0);
     if (!zv_wq) {
         pr_err("Zixine Velocity: Gagal mengalokasikan workqueue!\n");
         return -ENOMEM;
     }
 
-    /* 2. Registrasi Governor */
+    /* 2. Registrasi Governor ke sistem CPUFreq */
     err = cpufreq_register_governor(&gov_zixine_velocity);
     if (err) {
         pr_err("Zixine Velocity: Gagal mendaftarkan governor!\n");
-        destroy_workqueue(zv_wq); /* Bersihkan WQ jika registrasi gagal */
+        destroy_workqueue(zv_wq);
         return err;
     }
 
@@ -230,14 +227,10 @@ static int __init zv_gov_init(void)
 
 static void __exit zv_gov_exit(void)
 {
-    /* 1. Lepas Governor */
     cpufreq_unregister_governor(&gov_zixine_velocity);
-    
-    /* 2. Hancurkan Workqueue */
     if (zv_wq) {
         destroy_workqueue(zv_wq);
     }
-    
     pr_info("Zixine Velocity Governor Unloaded.\n");
 }
 
