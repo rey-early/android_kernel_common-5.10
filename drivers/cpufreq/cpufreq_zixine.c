@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Zixine Velocity v1.2 - Hybrid Schedutil Edition
- * Menggabungkan akurasi Scheduler-driven util dengan Zixine Velocity Boost.
+ * Zixine Velocity v1.2.1 - Hybrid Schedutil Edition (Fixed)
  * Author: zixine
  */
 
@@ -15,10 +14,18 @@
 #include <linux/workqueue.h>
 #include <linux/cpumask.h>
 
+/* * FIX: Definisikan enum secara lokal karena drivers/cpufreq 
+ * tidak punya akses ke kernel/sched/sched.h
+ */
+enum schedutil_type {
+    FREQUENCY_UTIL,
+    ENERGY_UTIL,
+};
+
 /* Zixine Velocity Tunables */
-static unsigned int target_load_big = 65;   // Lebih efisien untuk Big core
+static unsigned int target_load_big = 65;
 static unsigned int target_load_little = 75; 
-static unsigned int touch_boost_util = 250; // Boost utilitas dasar (skala 0-1024)
+static unsigned int touch_boost_util = 250; 
 static struct workqueue_struct *zv_wq;
 
 module_param(target_load_big, uint, 0644);
@@ -39,8 +46,8 @@ struct zv_policy_info {
     struct cpufreq_policy *policy;
 };
 
-/* * Memanggil fungsi Schedutil.
- * Fungsi ini mengekstrak utilitas CFS, RT, DL, dan IRQ.
+/* * Ambil fungsi dari symbol table kernel. 
+ * Selama kernelmu punya SCHEDUTIL, fungsi ini pasti ada.
  */
 extern unsigned long schedutil_cpu_util(int cpu, unsigned long util_cfs,
 				 unsigned long max, enum schedutil_type type,
@@ -53,31 +60,31 @@ static void zv_eval_freq(struct cpufreq_policy *policy)
     unsigned int load, freq_target, target_load;
     int util_velocity;
 
-    /* 1. Ambil Utilitas mentah dari Scheduler (PELT/WALT) */
+    /* 1. Ambil kapasitas maksimal CPU */
     max_cap = arch_scale_cpu_capacity(policy->cpu);
+    if (!max_cap) max_cap = 1024; // Fallback standar
+
+    /* 2. Ambil Utilitas dari Scheduler (PELT/WALT) */
     util = schedutil_cpu_util(policy->cpu, 0, max_cap, FREQUENCY_UTIL, NULL);
 
-    /* 2. Hitung Velocity (Akselerasi beban) */
+    /* 3. Hitung Velocity */
     util_velocity = (int)util - (int)info->prev_util;
     info->prev_util = util;
 
-    /* 3. Zixine Touch Boost: Jika ada lonjakan utilitas mendadak */
-    if (util_velocity > 150) { // Lonjakan tajam terdeteksi
+    /* 4. Touch Boost: Lonjakan mendadak */
+    if (util_velocity > 150) {
         util += touch_boost_util;
-        info->hold_counter = 12; // Tahan lebih lama untuk stabilitas frame
+        info->hold_counter = 12; 
     }
 
-    /* Konversi utilitas ke skala load 0-100 */
+    /* Skala load 0-100 */
     load = (util * 100) / max_cap;
     if (load > 100) load = 100;
 
     target_load = (policy->cpu >= 4) ? target_load_big : target_load_little;
 
-    /* 4. Kalkulasi Frekuensi ala Schedutil (f = 1.25 * f_max * util / max)
-     * Zixine menggunakan target_load sebagai pembagi dinamis.
-     */
+    /* 5. Kalkulasi Target Frekuensi */
     if (info->hold_counter > 0) {
-        /* Boost mode: Minimal 60% frekuensi maksimal saat interaksi */
         unsigned int boost_floor = (policy->max * 60) / 100;
         freq_target = (unsigned int)(((u64)policy->max * load) / target_load);
         if (freq_target < boost_floor) freq_target = boost_floor;
@@ -86,11 +93,9 @@ static void zv_eval_freq(struct cpufreq_policy *policy)
         freq_target = (unsigned int)(((u64)policy->max * load) / target_load);
     }
 
-    /* Clamp nilai frekuensi */
     if (freq_target < policy->min) freq_target = policy->min;
     if (freq_target > policy->max) freq_target = policy->max;
 
-    /* 5. Eksekusi Perubahan Frekuensi */
     if (freq_target != info->target_freq) {
         info->target_freq = freq_target;
         if (policy->fast_switch_enabled) {
@@ -100,7 +105,6 @@ static void zv_eval_freq(struct cpufreq_policy *policy)
         }
     }
 
-    /* Adaptive Delay: 8ms saat aktif, 40ms saat idle */
     info->next_delay_ms = (util > 100 || info->hold_counter > 0) ? 8 : 40;
 }
 
@@ -174,7 +178,7 @@ static int __init zv_gov_init(void)
         destroy_workqueue(zv_wq);
         return -EINVAL;
     }
-    pr_info("Zixine Velocity v1.2: Hybrid Schedutil Engaged!\n");
+    pr_info("Zixine Velocity v1.2.1: Hybrid Schedutil (Fixed) Engaged!\n");
     return 0;
 }
 
