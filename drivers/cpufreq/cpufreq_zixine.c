@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Zixine Velocity v1.2.1 - Hybrid Schedutil Edition (Fixed)
- * Author: zixine
+ * Zixine Velocity v1.2.2 - Stability & Cool Edition
+ * Fokus: Menghilangkan Overheat & Memperbaiki Dynamic Scaling
  */
 
 #include <linux/cpufreq.h>
@@ -9,33 +9,26 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/sched/cpufreq.h>
-#include <linux/sched/topology.h>
 #include <linux/workqueue.h>
-#include <linux/cpumask.h>
+#include <linux/kernel_stat.h>
+#include <linux/sched/cputime.h>
 
-/* * FIX: Definisikan enum secara lokal karena drivers/cpufreq 
- * tidak punya akses ke kernel/sched/sched.h
- */
-enum schedutil_type {
-    FREQUENCY_UTIL,
-    ENERGY_UTIL,
-};
-
-/* Zixine Velocity Tunables */
-static unsigned int target_load_big = 65;
-static unsigned int target_load_little = 75; 
-static unsigned int touch_boost_util = 250; 
+/* Parameter yang lebih seimbang */
+static unsigned int target_load_big = 80;    // Lebih santai
+static unsigned int target_load_little = 85; 
+static unsigned int touch_boost_load = 40;   // Boost moderat
 static struct workqueue_struct *zv_wq;
 
 module_param(target_load_big, uint, 0644);
 module_param(target_load_little, uint, 0644);
-module_param(touch_boost_util, uint, 0644);
+module_param(touch_boost_load, uint, 0644);
 
 struct zv_cpu_info {
-    unsigned long prev_util;
+    u64 prev_cpu_idle;
+    u64 prev_cpu_wall;
+    unsigned int prev_load;          
     unsigned int target_freq;
-    unsigned int hold_counter;
+    unsigned int hold_counter;       
     unsigned int next_delay_ms;
 };
 
@@ -46,53 +39,61 @@ struct zv_policy_info {
     struct cpufreq_policy *policy;
 };
 
-/* * Ambil fungsi dari symbol table kernel. 
- * Selama kernelmu punya SCHEDUTIL, fungsi ini pasti ada.
- */
-extern unsigned long schedutil_cpu_util(int cpu, unsigned long util_cfs,
-				 unsigned long max, enum schedutil_type type,
-				 struct task_struct *p);
+/* Helper: Ambil waktu CPU dalam Mikrodetik agar sinkron */
+static u64 get_cpu_idle_us(int cpu)
+{
+    struct kernel_cpustat kcpustat;
+    kcpustat_cpu_fetch(&kcpustat, cpu);
+    /* Konversi cputime (nanodetik) ke mikrodetik */
+    return nsecs_to_usecs(kcpustat.cpustat[CPUTIME_IDLE] + kcpustat.cpustat[CPUTIME_IOWAIT]);
+}
 
 static void zv_eval_freq(struct cpufreq_policy *policy)
 {
     struct zv_cpu_info *info = &per_cpu(zv_info, policy->cpu);
-    unsigned long util, max_cap;
+    u64 cur_wall, cur_idle, wall_time, idle_time;
     unsigned int load, freq_target, target_load;
-    int util_velocity;
 
-    /* 1. Ambil kapasitas maksimal CPU */
-    max_cap = arch_scale_cpu_capacity(policy->cpu);
-    if (!max_cap) max_cap = 1024; // Fallback standar
+    cur_wall = ktime_to_us(ktime_get());
+    cur_idle = get_cpu_idle_us(policy->cpu);
 
-    /* 2. Ambil Utilitas dari Scheduler (PELT/WALT) */
-    util = schedutil_cpu_util(policy->cpu, 0, max_cap, FREQUENCY_UTIL, NULL);
+    wall_time = cur_wall - info->prev_cpu_wall;
+    idle_time = cur_idle - info->prev_cpu_idle;
 
-    /* 3. Hitung Velocity */
-    util_velocity = (int)util - (int)info->prev_util;
-    info->prev_util = util;
+    info->prev_cpu_wall = cur_wall;
+    info->prev_cpu_idle = cur_idle;
 
-    /* 4. Touch Boost: Lonjakan mendadak */
-    if (util_velocity > 150) {
-        util += touch_boost_util;
-        info->hold_counter = 12; 
+    if (unlikely(wall_time <= idle_time || wall_time == 0)) {
+        load = 0;
+    } else {
+        load = 100 * (wall_time - idle_time) / wall_time;
     }
 
-    /* Skala load 0-100 */
-    load = (util * 100) / max_cap;
     if (load > 100) load = 100;
+
+    /* Deteksi lonjakan beban (Velocity) */
+    if ((int)load - (int)info->prev_load > 20) {
+        load += touch_boost_load;
+        info->hold_counter = 6; // Tahan sebentar saja
+    }
+    info->prev_load = load;
 
     target_load = (policy->cpu >= 4) ? target_load_big : target_load_little;
 
-    /* 5. Kalkulasi Target Frekuensi */
-    if (info->hold_counter > 0) {
-        unsigned int boost_floor = (policy->max * 60) / 100;
-        freq_target = (unsigned int)(((u64)policy->max * load) / target_load);
-        if (freq_target < boost_floor) freq_target = boost_floor;
-        info->hold_counter--;
+    /* Logika Frekuensi Dinamis murni */
+    if (load > 90) {
+        freq_target = policy->max;
     } else {
+        /* Rumus linier yang tidak akan mengunci frekuensi */
         freq_target = (unsigned int)(((u64)policy->max * load) / target_load);
     }
 
+    if (info->hold_counter > 0) {
+        if (freq_target < (policy->max / 2)) freq_target = policy->max / 2; // Floor hanya 50%
+        info->hold_counter--;
+    }
+
+    /* Clamp */
     if (freq_target < policy->min) freq_target = policy->min;
     if (freq_target > policy->max) freq_target = policy->max;
 
@@ -105,18 +106,16 @@ static void zv_eval_freq(struct cpufreq_policy *policy)
         }
     }
 
-    info->next_delay_ms = (util > 100 || info->hold_counter > 0) ? 8 : 40;
+    /* Sampling lebih cerdas: 16ms aktif, 100ms santai */
+    info->next_delay_ms = (load > 10 || info->hold_counter > 0) ? 16 : 100;
 }
 
 static void zv_work_handler(struct work_struct *work)
 {
     struct zv_policy_info *zpinfo = container_of(work, struct zv_policy_info, work.work);
-    struct cpufreq_policy *policy = zpinfo->policy;
-
-    zv_eval_freq(policy);
-
-    queue_delayed_work_on(policy->cpu, zv_wq, &zpinfo->work, 
-                          msecs_to_jiffies(per_cpu(zv_info, policy->cpu).next_delay_ms));
+    zv_eval_freq(zpinfo->policy);
+    queue_delayed_work_on(zpinfo->policy->cpu, zv_wq, &zpinfo->work, 
+                          msecs_to_jiffies(per_cpu(zv_info, zpinfo->policy->cpu).next_delay_ms));
 }
 
 static int zv_init(struct cpufreq_policy *policy)
@@ -145,11 +144,13 @@ static int zv_start(struct cpufreq_policy *policy)
     cpufreq_enable_fast_switch(policy);
     for_each_cpu(cpu, policy->cpus) {
         struct zv_cpu_info *info = &per_cpu(zv_info, cpu);
-        info->prev_util = 0;
+        info->prev_cpu_wall = ktime_to_us(ktime_get());
+        info->prev_cpu_idle = get_cpu_idle_us(cpu);
         info->hold_counter = 0;
+        info->prev_load = 0;
         info->target_freq = policy->cur;
     }
-    queue_delayed_work_on(policy->cpu, zv_wq, &((struct zv_policy_info *)policy->governor_data)->work, msecs_to_jiffies(8));
+    queue_delayed_work_on(policy->cpu, zv_wq, &((struct zv_policy_info *)policy->governor_data)->work, msecs_to_jiffies(16));
     return 0;
 }
 
@@ -178,7 +179,6 @@ static int __init zv_gov_init(void)
         destroy_workqueue(zv_wq);
         return -EINVAL;
     }
-    pr_info("Zixine Velocity v1.2.1: Hybrid Schedutil (Fixed) Engaged!\n");
     return 0;
 }
 
@@ -191,4 +191,3 @@ static void __exit zv_gov_exit(void)
 module_init(zv_gov_init);
 module_exit(zv_gov_exit);
 MODULE_LICENSE("GPL v2");
-MODULE_AUTHOR("zixine");
