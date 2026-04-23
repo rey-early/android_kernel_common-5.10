@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Zixine Velocity v1.2.2 - Stability & Cool Edition
- * Fokus: Menghilangkan Overheat & Memperbaiki Dynamic Scaling
+ * Zixine Velocity v1.2.3 - Final Heat Fix
+ * Fokus: Memperbaiki error kompilasi dan masalah suhu (Overheat).
  */
 
 #include <linux/cpufreq.h>
@@ -12,11 +12,12 @@
 #include <linux/workqueue.h>
 #include <linux/kernel_stat.h>
 #include <linux/sched/cputime.h>
+#include <linux/jiffies.h>
 
-/* Parameter yang lebih seimbang */
-static unsigned int target_load_big = 80;    // Lebih santai
-static unsigned int target_load_little = 85; 
-static unsigned int touch_boost_load = 40;   // Boost moderat
+/* Parameter yang lebih dingin */
+static unsigned int target_load_big = 85;    
+static unsigned int target_load_little = 90; 
+static unsigned int touch_boost_load = 30;   
 static struct workqueue_struct *zv_wq;
 
 module_param(target_load_big, uint, 0644);
@@ -39,13 +40,13 @@ struct zv_policy_info {
     struct cpufreq_policy *policy;
 };
 
-/* Helper: Ambil waktu CPU dalam Mikrodetik agar sinkron */
+/* Helper: Ambil waktu CPU dalam Mikrodetik */
 static u64 get_cpu_idle_us(int cpu)
 {
     struct kernel_cpustat kcpustat;
     kcpustat_cpu_fetch(&kcpustat, cpu);
-    /* Konversi cputime (nanodetik) ke mikrodetik */
-    return nsecs_to_usecs(kcpustat.cpustat[CPUTIME_IDLE] + kcpustat.cpustat[CPUTIME_IOWAIT]);
+    /* CPUTIME di kernel modern biasanya nanodetik, kita bagi 1000 */
+    return (kcpustat.cpustat[CPUTIME_IDLE] + kcpustat.cpustat[CPUTIME_IOWAIT]) / 1000;
 }
 
 static void zv_eval_freq(struct cpufreq_policy *policy)
@@ -54,46 +55,44 @@ static void zv_eval_freq(struct cpufreq_policy *policy)
     u64 cur_wall, cur_idle, wall_time, idle_time;
     unsigned int load, freq_target, target_load;
 
-    cur_wall = ktime_to_us(ktime_get());
+    /* Gunakan ktime_get_ns / 1000 sebagai pengganti ktime_to_us */
+    cur_wall = ktime_get_ns() / 1000;
     cur_idle = get_cpu_idle_us(policy->cpu);
 
     wall_time = cur_wall - info->prev_cpu_wall;
     idle_time = cur_idle - info->prev_cpu_idle;
 
-    info->prev_cpu_wall = cur_wall;
-    info->prev_cpu_idle = cur_idle;
-
-    if (unlikely(wall_time <= idle_time || wall_time == 0)) {
+    /* Hindari pembagian nol atau nilai negatif */
+    if (unlikely((s64)wall_time <= (s64)idle_time || wall_time == 0)) {
         load = 0;
     } else {
-        load = 100 * (wall_time - idle_time) / wall_time;
+        load = (unsigned int)(100 * (wall_time - idle_time) / wall_time);
     }
 
     if (load > 100) load = 100;
 
-    /* Deteksi lonjakan beban (Velocity) */
-    if ((int)load - (int)info->prev_load > 20) {
+    /* Boost hanya jika ada lonjakan signifikan */
+    if ((int)load - (int)info->prev_load > 25) {
         load += touch_boost_load;
-        info->hold_counter = 6; // Tahan sebentar saja
+        info->hold_counter = 5; 
     }
     info->prev_load = load;
 
     target_load = (policy->cpu >= 4) ? target_load_big : target_load_little;
 
-    /* Logika Frekuensi Dinamis murni */
-    if (load > 90) {
+    /* Logika Frekuensi Dinamis */
+    if (load > 95) {
         freq_target = policy->max;
+    } else if (info->hold_counter > 0) {
+        /* Tahan di frekuensi menengah saat boost (tidak mengunci di max) */
+        freq_target = (policy->max * 60) / 100; 
+        info->hold_counter--;
     } else {
-        /* Rumus linier yang tidak akan mengunci frekuensi */
+        /* Skala linear murni agar frekuensi bisa turun ke paling bawah */
         freq_target = (unsigned int)(((u64)policy->max * load) / target_load);
     }
 
-    if (info->hold_counter > 0) {
-        if (freq_target < (policy->max / 2)) freq_target = policy->max / 2; // Floor hanya 50%
-        info->hold_counter--;
-    }
-
-    /* Clamp */
+    /* Clamp ke batas policy device */
     if (freq_target < policy->min) freq_target = policy->min;
     if (freq_target > policy->max) freq_target = policy->max;
 
@@ -106,8 +105,8 @@ static void zv_eval_freq(struct cpufreq_policy *policy)
         }
     }
 
-    /* Sampling lebih cerdas: 16ms aktif, 100ms santai */
-    info->next_delay_ms = (load > 10 || info->hold_counter > 0) ? 16 : 100;
+    /* Sampling Rate: 16ms (Aktif) vs 100ms (Idle/Deep Sleep) */
+    info->next_delay_ms = (load > 15 || info->hold_counter > 0) ? 16 : 100;
 }
 
 static void zv_work_handler(struct work_struct *work)
@@ -144,7 +143,7 @@ static int zv_start(struct cpufreq_policy *policy)
     cpufreq_enable_fast_switch(policy);
     for_each_cpu(cpu, policy->cpus) {
         struct zv_cpu_info *info = &per_cpu(zv_info, cpu);
-        info->prev_cpu_wall = ktime_to_us(ktime_get());
+        info->prev_cpu_wall = ktime_get_ns() / 1000;
         info->prev_cpu_idle = get_cpu_idle_us(cpu);
         info->hold_counter = 0;
         info->prev_load = 0;
@@ -179,6 +178,7 @@ static int __init zv_gov_init(void)
         destroy_workqueue(zv_wq);
         return -EINVAL;
     }
+    pr_info("Zixine Velocity v1.2.3: Thermal-Optimized Ready!\n");
     return 0;
 }
 
@@ -191,3 +191,4 @@ static void __exit zv_gov_exit(void)
 module_init(zv_gov_init);
 module_exit(zv_gov_exit);
 MODULE_LICENSE("GPL v2");
+MODULE_AUTHOR("zixine");
