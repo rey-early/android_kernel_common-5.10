@@ -2337,7 +2337,7 @@ static bool inactive_is_low(struct lruvec *lruvec, enum lru_list inactive_lru)
 
 	gb = (inactive + active) >> (30 - PAGE_SHIFT);
 #ifdef CONFIG_OPLUS_MM_HACKS
-		if (file && gb)
+		if (is_file_lru(inactive_lru) && gb)
 			inactive_ratio = min(2UL, int_sqrt(10 * gb));
 #endif /* CONFIG_OPLUS_MM_HACKS */
 	trace_android_vh_inactive_is_low(gb, &inactive_ratio, inactive_lru, &skip);

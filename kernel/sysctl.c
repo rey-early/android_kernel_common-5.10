@@ -2975,8 +2975,8 @@ static struct ctl_table vm_table[] = {
 		.maxlen 	= sizeof(direct_vm_swappiness),
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec_minmax,
-		.extra1 	= &zero,
-		.extra2 	= &sixty,
+		.extra1 = SYSCTL_ZERO,
+        .extra2 = SYSCTL_ONE_HUNDRED,
 	},
 #endif /* CONFIG_OPLUS_MM_HACKS */
 #ifdef CONFIG_NUMA
