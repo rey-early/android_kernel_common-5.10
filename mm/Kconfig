@@ -960,6 +960,15 @@ config ARCH_HAS_HUGEPD
 config MAPPING_DIRTY_HELPERS
         bool
 
+config OPLUS_MM_HACKS
+	bool "Enable oplus memory management hacks"
+	default n
+	help
+	  Improves memory management drastically as these hacks are used in Oplus devices.
+	  Tested on devices made by OEMs like Motorola and Samsung.
+
+	  If unsure, say "n".
+
 source "mm/damon/Kconfig"
 
 endmenu

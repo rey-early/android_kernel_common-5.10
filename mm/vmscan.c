@@ -199,6 +199,13 @@ static u64 workingset_protection_prev_totalram __read_mostly = 0;
  */
 int vm_swappiness = 100;
 
+#ifdef CONFIG_OPLUS_MM_HACKS
+/*
+ * Direct reclaim swappiness, values range from 0 .. 60. Higher means more swappy.
+ */
+int direct_vm_swappiness = 20;
+#endif /* CONFIG_OPLUS_MM_HACKS */
+
 struct kcompress_t kcompress_data[MAX_NUMNODES];
 
 #define DEF_KSWAPD_THREADS_PER_NODE 1
@@ -2003,6 +2010,10 @@ static unsigned noinline_for_stack move_pages_to_lru(struct lruvec *lruvec,
  */
 static int current_may_throttle(void)
 {
+#ifdef CONFIG_OPLUS_MM_HACKS
+	if ((current->signal->oom_score_adj < 0))
+		return 0;
+#endif /* CONFIG_OPLUS_MM_HACKS */
 	return !(current->flags & PF_LOCAL_THROTTLE) ||
 		current->backing_dev_info == NULL ||
 		bdi_write_congested(current->backing_dev_info);
@@ -2325,6 +2336,10 @@ static bool inactive_is_low(struct lruvec *lruvec, enum lru_list inactive_lru)
 	active = lruvec_page_state(lruvec, NR_LRU_BASE + active_lru);
 
 	gb = (inactive + active) >> (30 - PAGE_SHIFT);
+#ifdef CONFIG_OPLUS_MM_HACKS
+		if (file && gb)
+			inactive_ratio = min(2UL, int_sqrt(10 * gb));
+#endif /* CONFIG_OPLUS_MM_HACKS */
 	trace_android_vh_inactive_is_low(gb, &inactive_ratio, inactive_lru, &skip);
 	if (skip)
 		goto out;
@@ -2369,8 +2384,19 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 	enum lru_list lru;
 	bool balance_anon_file_reclaim = false;
 
+#ifdef CONFIG_OPLUS_MM_HACKS
+	unsigned long totalswap = total_swap_pages;
+#endif /* CONFIG_OPLUS_MM_HACKS */
+
+#ifdef CONFIG_OPLUS_MM_HACKS
+	if (!current_is_kswapd())
+		swappiness = direct_vm_swappiness;
+	if (!sc->may_swap || (mem_cgroup_get_nr_swap_pages(memcg) <= totalswap>>6)) {
+#else
+
 	/* If we have no swap space, do not bother scanning anon pages. */
 	if (!sc->may_swap || mem_cgroup_get_nr_swap_pages(memcg) <= 0) {
+#endif /* CONFIG_OPLUS_MM_HACKS */
 		scan_balance = SCAN_FILE;
 		goto out;
 	}
