@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * P002 Kernel Extensions Framework 
+ * P002 Kernel Extensions Framework
  *
- * Copyright (C) 2026 RapliVx
+ * Copyright (C) 2026 RapliVx X Mahiro
  */
 
 #include <linux/kernel.h>
@@ -14,35 +14,42 @@
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
 #include <linux/slab.h>
+#include <linux/rwlock.h>
 #include <linux/p002_attributes.h>
 
-/* Task Killer State */
-static char p002_bg_blocklist[P002_BLOCKLIST_STRLEN] = "com.shopee.id,com.lazada.android,com.tokopedia.tkpd,com.ss.android.ugc.trill";
+/* Global State */
+static char p002_bg_blocklist[P002_BLOCKLIST_STRLEN] = 
+    "com.shopee.id,com.lazada.android,com.tokopedia.tkpd,com.ss.android.ugc.trill,com.facebook.katana";
+
 static char restricted_apps[P002_MAX_BLOCKED][TASK_COMM_LEN];
 static u8   restricted_len[P002_MAX_BLOCKED];
 static int  restricted_cnt;
 
 static struct kobject *p002_kobj;
+static rwlock_t p002_lock;
 
-/*
- * Event-Driven Task Killer
- */
-
+/* Helpers */
 static bool p002_is_restricted(const char *comm)
 {
     int i;
+    bool found = false;
+
+    read_lock(&p002_lock);
     for (i = 0; i < restricted_cnt; i++) {
-        if (!strncmp(comm, restricted_apps[i], restricted_len[i]))
-            return true;
+        if (!strncmp(comm, restricted_apps[i], restricted_len[i])) {
+            found = true;
+            break;
+        }
     }
-    return false;
+    read_unlock(&p002_lock);
+    return found;
 }
 
 void p002_background_event(struct task_struct *task, short oom_adj)
 {
     if (oom_adj >= 200) {
         if (unlikely(p002_is_restricted(task->comm))) {
-            pr_info("P002: INSTANT KILL! '%s' (PID: %d) entered background (OOM: %d)\n", 
+            pr_info("P002: Killing restricted app '%s' (PID: %d), OOM score: %d\n", 
                     task->comm, task->pid, oom_adj);
             send_sig(SIGKILL, task, 0);
         }
@@ -50,22 +57,23 @@ void p002_background_event(struct task_struct *task, short oom_adj)
 }
 EXPORT_SYMBOL_GPL(p002_background_event);
 
-/*
- * Sysfs Interfaces
- */
-
+/* Sysfs Logic */
 static void p002_rebuild_blocklist(char *buf)
 {
-    char *p = buf;
     char *token;
+    int count = 0;
 
-    restricted_cnt = 0;
-    while ((token = strsep(&p, ",")) && restricted_cnt < P002_MAX_BLOCKED) {
+    write_lock(&p002_lock);
+    
+    while ((token = strsep(&buf, ",")) && count < P002_MAX_BLOCKED) {
         if (!*token) continue;
-        strlcpy(restricted_apps[restricted_cnt], token, TASK_COMM_LEN);
-        restricted_len[restricted_cnt] = strlen(restricted_apps[restricted_cnt]);
-        restricted_cnt++;
+        strscpy(restricted_apps[count], token, TASK_COMM_LEN);
+        restricted_len[count] = strlen(restricted_apps[count]);
+        count++;
     }
+    restricted_cnt = count;
+    
+    write_unlock(&p002_lock);
     pr_info("P002: Blocklist updated. Total active: %d\n", restricted_cnt);
 }
 
@@ -77,10 +85,16 @@ static ssize_t bg_blocklist_show(struct kobject *kobj, struct kobj_attribute *at
 static ssize_t bg_blocklist_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
 {
     char tmp[P002_BLOCKLIST_STRLEN];
-    strlcpy(tmp, buf, sizeof(tmp));
+    
+    if (count >= P002_BLOCKLIST_STRLEN)
+        return -EINVAL;
+
+    strscpy(tmp, buf, sizeof(tmp));
     strreplace(tmp, '\n', '\0');
-    strlcpy(p002_bg_blocklist, tmp, sizeof(p002_bg_blocklist));
+    
+    strscpy(p002_bg_blocklist, tmp, sizeof(p002_bg_blocklist));
     p002_rebuild_blocklist(tmp);
+    
     return count;
 }
 
@@ -93,23 +107,20 @@ static struct attribute *p002_attrs[] = {
 
 static const struct attribute_group p002_attr_group = { .attrs = p002_attrs };
 
-/* * Framework Initialization
- */
-
-static int __init p002_attributes_init(void) 
+/* Lifecycle */
+static int __init p002_init(void)
 {
     int ret;
     char tmp[P002_BLOCKLIST_STRLEN];
 
-    pr_info("P002: Initializing Framework v2.3 Task Killer Only..\n");
+    pr_info("P002: Initializing Framework v2.3\n");
+    rwlock_init(&p002_lock);
 
-    /* Init Task Killer Blocklist */
-    strlcpy(tmp, p002_bg_blocklist, sizeof(tmp));
+    strscpy(tmp, p002_bg_blocklist, sizeof(tmp));
     p002_rebuild_blocklist(tmp);
 
-    /* Create Sysfs Directory /sys/kernel/p002/ */
     p002_kobj = kobject_create_and_add("p002", kernel_kobj);
-    if (!p002_kobj) 
+    if (!p002_kobj)
         return -ENOMEM;
 
     ret = sysfs_create_group(p002_kobj, &p002_attr_group);
@@ -120,9 +131,18 @@ static int __init p002_attributes_init(void)
 
     return 0;
 }
-core_initcall(p002_attributes_init);
+
+static void __exit p002_exit(void)
+{
+    sysfs_remove_group(p002_kobj, &p002_attr_group);
+    kobject_put(p002_kobj);
+    pr_info("P002: Framework unloaded\n");
+}
+
+module_init(p002_init);
+module_exit(p002_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("RapliVx | X | Mahiro");
+MODULE_AUTHOR("RapliVx X Mahiro");
 MODULE_DESCRIPTION("P002 Framework: Universal OOM Killer");
 MODULE_VERSION("2.3");
