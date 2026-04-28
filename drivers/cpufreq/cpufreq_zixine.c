@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Zixine Velocity v1.2.6 - Ultimate Hybrid Performance
- * Garang saat kerja, irit saat santai.
+ * Zixine Velocity v1.2.7 - GKI Optimized
+ * Fierce at work, economical at leisure.
  */
 
 #include <linux/cpufreq.h>
@@ -11,10 +11,12 @@
 #include <linux/slab.h>
 #include <linux/workqueue.h>
 #include <linux/tick.h>
+#include <linux/sched/cpufreq.h>
+#include <linux/kernel_stat.h>
 
 /* Parameter Tunable */
-static unsigned int target_load = 85;       // Target beban (80-90 seimbang)
-static unsigned int velocity_kick = 15;     // Sensitivitas lonjakan (lebih kecil = lebih peka)
+static unsigned int target_load = 85;
+static unsigned int velocity_kick = 15;
 
 struct zv_cpu_info {
 	u64 prev_idle;
@@ -29,7 +31,16 @@ static DEFINE_PER_CPU(struct zv_cpu_info, zv_info);
 struct zv_policy_info {
 	struct delayed_work work;
 	struct cpufreq_policy *policy;
+	bool is_active;
 };
+
+/* Helper to retrieve idle data without using GKI prohibited symbols */
+static u64 get_cpu_idle_time_gki(int cpu)
+{
+	u64 idle;
+	idle = kcpustat_cpu(cpu).cpustat[CPUTIME_IDLE];
+	return nsecs_to_usecs(idle);
+}
 
 static void zv_eval(struct cpufreq_policy *policy)
 {
@@ -39,12 +50,15 @@ static void zv_eval(struct cpufreq_policy *policy)
 	int load_velocity;
 
 	cur_wall = ktime_to_us(ktime_get());
-	cur_idle = get_cpu_idle_time(policy->cpu, &cur_wall, 1);
+	cur_idle = get_cpu_idle_time_gki(policy->cpu);
+
+	if (unlikely(cur_wall <= info->prev_wall))
+		return;
 
 	wall_time = cur_wall - info->prev_wall;
-	idle_time = cur_idle - info->prev_idle;
+	idle_time = (cur_idle > info->prev_idle) ? (cur_idle - info->prev_idle) : 0;
 
-	if (unlikely((s64)wall_time <= (s64)idle_time || wall_time == 0)) {
+	if (unlikely(wall_time <= idle_time || wall_time == 0)) {
 		load = 0;
 	} else {
 		load = (unsigned int)(100 * (wall_time - idle_time) / wall_time);
@@ -53,26 +67,23 @@ static void zv_eval(struct cpufreq_policy *policy)
 	info->prev_wall = cur_wall;
 	info->prev_idle = cur_idle;
 
-	/* --- VELOCITY LOGIC --- */
+	/* --- VELOCITY LOGIC (ORIGINAL) --- */
 	load_velocity = (int)load - (int)info->prev_load;
 	info->prev_load = load;
 
 	if (load_velocity > (int)velocity_kick) {
-		/* LONJAKAN TERDETEKSI: Garang! */
 		freq_target = policy->max;
-		info->hold_count = 10; // Tahan performa tinggi selama 10 siklus
+		info->hold_count = 10; 
 	} else if (info->hold_count > 0) {
-		/* MODE SIAGA: Mencegah stutter */
-		freq_target = (policy->max * 70) / 100; // Tahan di 70% frekuensi
+		freq_target = (policy->max * 70) / 100;
 		if (freq_target < (policy->max * load / target_load))
 			freq_target = (policy->max * load / target_load);
 		info->hold_count--;
 	} else {
-		/* MODE HEMAT: Turun sesuai beban aplikasi ringan */
 		freq_target = (unsigned int)(((u64)policy->max * load) / target_load);
 	}
 
-	/* Proteksi Batas */
+	/* Frequency Limiting */
 	if (freq_target < policy->min) freq_target = policy->min;
 	if (freq_target > policy->max) freq_target = policy->max;
 
@@ -81,7 +92,7 @@ static void zv_eval(struct cpufreq_policy *policy)
 		if (policy->fast_switch_enabled) {
 			cpufreq_driver_fast_switch(policy, freq_target);
 		} else {
-			__cpufreq_driver_target(policy, freq_target, CPUFREQ_RELATION_H);
+			__cpufreq_driver_target(policy, freq_target, CPUFREQ_RELATION_L);
 		}
 	}
 }
@@ -89,9 +100,12 @@ static void zv_eval(struct cpufreq_policy *policy)
 static void zv_work_handler(struct work_struct *work)
 {
 	struct zv_policy_info *zpinfo = container_of(work, struct zv_policy_info, work.work);
+	
+	if (!zpinfo->is_active)
+		return;
+
 	zv_eval(zpinfo->policy);
 	
-	/* ADAPTIVE SAMPLING: 16ms (Aktif) vs 100ms (Idle) */
 	unsigned int delay = (per_cpu(zv_info, zpinfo->policy->cpu).prev_load > 5 || 
 						  per_cpu(zv_info, zpinfo->policy->cpu).hold_count > 0) ? 16 : 100;
 	
@@ -102,7 +116,9 @@ static int zv_init(struct cpufreq_policy *policy)
 {
 	struct zv_policy_info *zpinfo = kzalloc(sizeof(*zpinfo), GFP_KERNEL);
 	if (!zpinfo) return -ENOMEM;
+
 	zpinfo->policy = policy;
+	zpinfo->is_active = false;
 	INIT_DELAYED_WORK(&zpinfo->work, zv_work_handler);
 	policy->governor_data = zpinfo;
 	return 0;
@@ -112,6 +128,7 @@ static void zv_exit(struct cpufreq_policy *policy)
 {
 	struct zv_policy_info *zpinfo = policy->governor_data;
 	if (zpinfo) {
+		zpinfo->is_active = false;
 		cancel_delayed_work_sync(&zpinfo->work);
 		kfree(zpinfo);
 		policy->governor_data = NULL;
@@ -120,23 +137,32 @@ static void zv_exit(struct cpufreq_policy *policy)
 
 static int zv_start(struct cpufreq_policy *policy)
 {
+	struct zv_policy_info *zpinfo = policy->governor_data;
 	unsigned int cpu;
+
+	if (!zpinfo) return -EINVAL;
+	zpinfo->is_active = true;
+
 	for_each_cpu(cpu, policy->cpus) {
 		struct zv_cpu_info *info = &per_cpu(zv_info, cpu);
 		info->prev_wall = ktime_to_us(ktime_get());
-		info->prev_idle = get_cpu_idle_time(cpu, &info->prev_wall, 1);
+		info->prev_idle = get_cpu_idle_time_gki(cpu);
 		info->hold_count = 0;
 		info->prev_load = 0;
 		info->target_freq = policy->cur;
 	}
-	schedule_delayed_work_on(policy->cpu, &((struct zv_policy_info *)policy->governor_data)->work, msecs_to_jiffies(16));
+
+	schedule_delayed_work_on(policy->cpu, &zpinfo->work, msecs_to_jiffies(16));
 	return 0;
 }
 
 static void zv_stop(struct cpufreq_policy *policy)
 {
 	struct zv_policy_info *zpinfo = policy->governor_data;
-	if (zpinfo) cancel_delayed_work_sync(&zpinfo->work);
+	if (zpinfo) {
+		zpinfo->is_active = false;
+		cancel_delayed_work_sync(&zpinfo->work);
+	}
 }
 
 static struct cpufreq_governor gov_zixine_velocity = {
@@ -154,5 +180,14 @@ static int __init zv_gov_init(void)
 	return cpufreq_register_governor(&gov_zixine_velocity);
 }
 
+static void __exit zv_gov_exit(void)
+{
+	cpufreq_unregister_governor(&gov_zixine_velocity);
+}
+
 module_init(zv_gov_init);
+module_exit(zv_gov_exit);
+
+MODULE_AUTHOR("Zixine");
+MODULE_DESCRIPTION("Zixine Velocity Governor v1.2.7 (GKI 12-5.10)");
 MODULE_LICENSE("GPL v2");
