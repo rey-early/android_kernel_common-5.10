@@ -240,6 +240,13 @@ static match_table_t f2fs_tokens = {
 	{Opt_err, NULL},
 };
 
+/* Fix unknown symbol in dev_gc */
+bool g_dev_gc_hba = false;
+EXPORT_SYMBOL(g_dev_gc_hba);
+
+void (*g_fs_defrag_operation)(void) = NULL;
+EXPORT_SYMBOL(g_fs_defrag_operation);
+
 void f2fs_printk(struct f2fs_sb_info *sbi, const char *fmt, ...)
 {
 	struct va_format vaf;

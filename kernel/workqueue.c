@@ -4380,7 +4380,8 @@ err_destroy:
 	destroy_workqueue(wq);
 	return NULL;
 }
-EXPORT_SYMBOL_GPL(alloc_workqueue);
+
+EXPORT_SYMBOL(alloc_workqueue);
 
 static bool pwq_busy(struct pool_workqueue *pwq)
 {
