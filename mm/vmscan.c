@@ -3312,6 +3312,7 @@ static __always_inline bool task_is_critical(void)
 	get_task_comm(comm, current);
 
 	return !strncmp(comm, "surfaceflinger", TASK_COMM_LEN) ||
+	       !strncmp(comm, "android.hardwar", TASK_COMM_LEN) ||
 	       !strncmp(comm, "system_server", TASK_COMM_LEN) ||
 	       !strncmp(comm, "cameraserver", TASK_COMM_LEN);
 }
