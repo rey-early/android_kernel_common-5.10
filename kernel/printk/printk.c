@@ -750,19 +750,22 @@ static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 			level = LOG_LEVEL(u);
 			if (LOG_FACILITY(u) != 0)
 				facility = LOG_FACILITY(u);
-			endp++;
+						endp++;
 			len -= endp - line;
 			line = endp;
-
-			if (strstr(line, "healthd") ||
- 			   strstr(line, "dashd") ||
-   			 strstr(line, "Awinic") ||               /* Blokir spam audio driver */
-   			 strstr(line, "perfNotifyThermalState") || /* Blokir spam thermal */
-  			  strncmp(line, "logd: Skipping", sizeof("logd: Skipping") - 1) == 0) {
- 			   kfree(buf);
-  			  return ret;
-			}
 		}
+	}
+
+	if (strstr(line, "healthd") ||
+	    strstr(line, "dashd") ||
+	    strstr(line, "Awinic") ||
+	    strstr(line, "ULELite") ||
+	    strstr(line, "DisplayModeDirector") ||
+	    strstr(line, "CompositionEngine") ||
+	    strstr(line, "perfNotifyThermalState") ||
+	    strncmp(line, "logd: Skipping", sizeof("logd: Skipping") - 1) == 0) {
+		kfree(buf);
+		return len;
 	}
 
 	if ((strstr(line, "healthd")) || (strstr(line, "logd")) ||
