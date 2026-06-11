@@ -1497,12 +1497,10 @@ static int syslog_print(char __user *buf, int size)
 {
 	struct printk_info info;
 	struct printk_record r;
-	char *text;
+	char text[LOG_LINE_MAX + PREFIX_MAX];
 	int len = 0;
 
-	text = kmalloc(LOG_LINE_MAX + PREFIX_MAX, GFP_KERNEL);
-	if (!text)
-		return -ENOMEM;
+	memset(&text, 0, LOG_LINE_MAX + PREFIX_MAX);
 
 	prb_rec_init_rd(&r, &info, text, LOG_LINE_MAX + PREFIX_MAX);
 
@@ -1557,7 +1555,6 @@ static int syslog_print(char __user *buf, int size)
 		buf += n;
 	}
 
-	kfree(text);
 	return len;
 }
 
@@ -1566,14 +1563,12 @@ static int syslog_print_all(char __user *buf, int size, bool clear)
 	struct printk_info info;
 	unsigned int line_count;
 	struct printk_record r;
-	char *text;
+	char text[LOG_LINE_MAX + PREFIX_MAX];
 	int len = 0;
 	u64 seq;
 	bool time;
 
-	text = kmalloc(LOG_LINE_MAX + PREFIX_MAX, GFP_KERNEL);
-	if (!text)
-		return -ENOMEM;
+	memset(&text, 0, LOG_LINE_MAX + PREFIX_MAX);
 
 	time = printk_time;
 	logbuf_lock_irq();
@@ -1619,7 +1614,6 @@ static int syslog_print_all(char __user *buf, int size, bool clear)
 		clear_seq = seq;
 	logbuf_unlock_irq();
 
-	kfree(text);
 	return len;
 }
 
