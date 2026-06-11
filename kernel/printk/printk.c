@@ -752,9 +752,15 @@ static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 			endp++;
 			len -= endp - line;
 			line = endp;
+
 			if (strstr(line, "healthd") ||
-				strncmp(line, "logd: Skipping", sizeof("logd: Skipping")))
-				return ret;
+ 			   strstr(line, "dashd") ||
+   			 strstr(line, "Awinic") ||               /* Blokir spam audio driver */
+   			 strstr(line, "perfNotifyThermalState") || /* Blokir spam thermal */
+  			  strncmp(line, "logd: Skipping", sizeof("logd: Skipping") - 1) == 0) {
+ 			   kfree(buf);
+  			  return ret;
+			}
 		}
 	}
 
