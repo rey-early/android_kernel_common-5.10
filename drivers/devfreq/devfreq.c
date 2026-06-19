@@ -26,7 +26,6 @@
 #include <linux/hrtimer.h>
 #include <linux/of.h>
 #include <linux/pm_qos.h>
-#include <linux/devfreq_boost.h>
 #include "governor.h"
 
 #define CREATE_TRACE_POINTS
@@ -920,24 +919,6 @@ struct devfreq *devfreq_add_device(struct device *dev,
 	list_add(&devfreq->node, &devfreq_list);
 
 	mutex_unlock(&devfreq_list_lock);
-
-/* P002 Framework: Universal Devfreq Boost Hook */
-#ifdef CONFIG_DEVFREQ_BOOST
-	if (dev && dev_name(dev)) {
-		const char *dname = dev_name(dev);
-
-		/* Match common DDR/LLCC/DVFSRC bandwidth node names dynamically. */
-		if (strstr(dname, "cpu-llcc-ddr-bw") ||
-		    strstr(dname, "cpu-ddr-bw") ||
-		    strstr(dname, "ddr_bw") ||
-		    strstr(dname, "cci") ||
-		    strstr(dname, "mtk-dvfsrc")) {
-
-			devfreq_register_boost_device(DEVFREQ_MSM_LLCCBW, devfreq);
-			pr_debug("Successfully hooked %s to devfreq boost\n", dname);
-		}
-	}
-#endif
 
 	return devfreq;
 
