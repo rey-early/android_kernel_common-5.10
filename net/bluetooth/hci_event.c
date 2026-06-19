@@ -2747,10 +2747,12 @@ static void hci_conn_request_evt(struct hci_dev *hdev, struct sk_buff *skb)
 		return;
 	}
 
+	hci_dev_lock(hdev);
+
 	if (hci_bdaddr_list_lookup(&hdev->blacklist, &ev->bdaddr,
 				   BDADDR_BREDR)) {
 		hci_reject_conn(hdev, &ev->bdaddr);
-		return;
+		goto unlock;
 	}
 
 	/* Require HCI_CONNECTABLE or a whitelist entry to accept the
@@ -2762,12 +2764,10 @@ static void hci_conn_request_evt(struct hci_dev *hdev, struct sk_buff *skb)
 	    !hci_bdaddr_list_lookup_with_flags(&hdev->whitelist, &ev->bdaddr,
 					       BDADDR_BREDR)) {
 		hci_reject_conn(hdev, &ev->bdaddr);
-		return;
+		goto unlock;
 	}
 
 	/* Connection accepted */
-
-	hci_dev_lock(hdev);
 
 	ie = hci_inquiry_cache_lookup(hdev, &ev->bdaddr);
 	if (ie)
@@ -2780,14 +2780,11 @@ static void hci_conn_request_evt(struct hci_dev *hdev, struct sk_buff *skb)
 				    HCI_ROLE_SLAVE);
 		if (!conn) {
 			bt_dev_err(hdev, "no memory for new connection");
-			hci_dev_unlock(hdev);
-			return;
+			goto unlock;
 		}
 	}
 
 	memcpy(conn->dev_class, ev->dev_class, 3);
-
-	hci_dev_unlock(hdev);
 
 	if (ev->link_type == ACL_LINK ||
 	    (!(flags & HCI_PROTO_DEFER) && !lmp_esco_capable(hdev))) {
@@ -2821,6 +2818,9 @@ static void hci_conn_request_evt(struct hci_dev *hdev, struct sk_buff *skb)
 		conn->state = BT_CONNECT2;
 		hci_connect_cfm(conn, 0);
 	}
+
+unlock:
+	hci_dev_unlock(hdev);
 }
 
 static u8 hci_to_mgmt_reason(u8 err)
