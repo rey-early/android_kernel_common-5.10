@@ -404,15 +404,4 @@ config QORIQ_CPUFREQ
 	  which are capable of changing the CPU's frequency dynamically.
 
 endif
-
-config CPU_INPUT_BOOST
-	bool "CPU Input Boost"
-	depends on CPU_FREQ
-	help
-	  Enable dynamic CPU frequency boosting upon input events.
-	  This feature intercepts input subsystem events and temporarily
-	  boosts CPU frequencies to improve UI responsiveness.
-
-	  If unsure, say N.
-
 endmenu
